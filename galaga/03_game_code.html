@@ -1,0 +1,1986 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Galaga - Retro Arcade</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        #game-container {
+            position: relative;
+            width: 100%;
+            max-width: 448px;
+            height: 100%;
+            max-height: 512px;
+            aspect-ratio: 448 / 512;
+            display: flex;
+            flex-direction: column;
+        }
+        canvas {
+            background: #000;
+            width: 100%;
+            height: 100%;
+            display: block;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
+            image-rendering: pixelated;
+        }
+        #virtual-pad {
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 20px;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .pad-btn {
+            width: 60px;
+            height: 60px;
+            background: rgba(255, 255, 255, 0.25);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            font-weight: bold;
+            pointer-events: auto;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .pad-btn:active {
+            background: rgba(255, 255, 255, 0.6);
+        }
+        #fire-btn {
+            background: rgba(255, 0, 0, 0.35);
+            border-color: rgba(255, 0, 0, 0.7);
+            width: 70px;
+            height: 70px;
+        }
+        #fire-btn:active {
+            background: rgba(255, 0, 0, 0.7);
+        }
+        #left-right-group {
+            display: flex;
+            gap: 20px;
+        }
+        /* Hide virtual pad on non-touch devices */
+        @media (pointer: fine) {
+            #virtual-pad {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas" width="448" height="512"></canvas>
+    <div id="virtual-pad">
+        <div id="left-right-group">
+            <div id="left-btn" class="pad-btn">◀</div>
+            <div id="right-btn" class="pad-btn">▶</div>
+        </div>
+        <div id="fire-btn" class="pad-btn">FIRE</div>
+    </div>
+</div>
+
+<script>
+// --- 1. Sprite Pixel Data & Colors ---
+const PALETTE = {
+    '.': 'transparent',
+    'W': '#FFFFFF', // White
+    'R': '#FF0000', // Red
+    'B': '#1E90FF', // Dodger Blue
+    'G': '#00FF00', // Green
+    'Y': '#FFFF00', // Yellow
+    'C': '#00FFFF', // Cyan
+    'P': '#FF00FF', // Pink/Magenta
+    'O': '#FFA500', // Orange
+    'D': '#A9A9A9', // Dark Gray
+};
+
+const SPRITE_PLAYER = [
+    ".......WW.......",
+    "......WWWW......",
+    ".....WWWWWW.....",
+    ".....WRWWRW.....",
+    ".....WRWWRW.....",
+    "....WWWWWWWW....",
+    "...WWWWWWWWWW...",
+    "..WWWWRRRRWWWW..",
+    ".WWWWRRRRRRWWWW.",
+    "WWWWWWWWWWWWWWWW",
+    "WWW...WWWW...WWW",
+    "WW....WWWW....WW",
+    "W.....WWWW.....W",
+    "W......WW......W",
+    ".......WW.......",
+    ".......WW......."
+];
+
+// Boss (HP=2) - Frame A (Normal/Yellow)
+const SPRITE_BOSS_A = [
+    "...CC....CC...",
+    "..CCCC..CCCC..",
+    ".CCCCCCCCCCCC.",
+    "CCCCCCCCCCCCCC",
+    "CCYYYYYYYYYYCC",
+    "CYYYYYYYYYYYYC",
+    "YYYYWWYYYYWWYY",
+    "YYYYWWYYYYWWYY",
+    "YYYYYYYYYYYYYY",
+    ".YYYYYYYYYYYY.",
+    "..YYYYYYYYYY..",
+    "...YYYYYYYY...",
+    "....YYYYYY....",
+    ".....YYYY.....",
+    "......YY......",
+    "............."
+];
+
+// Boss - Frame B (Wings spread)
+const SPRITE_BOSS_B = [
+    "C..CC....CC..C",
+    "CC.CC....CC.CC",
+    "CCCCCCCCCCCCCC",
+    ".CCCCCCCCCCCC.",
+    "CYYYYYYYYYYYYC",
+    "YYYYYYYYYYYYYY",
+    "YYYYWWYYYYWWYY",
+    "YYYYWWYYYYWWYY",
+    "YYYYYYYYYYYYYY",
+    ".YYYYYYYYYYYY.",
+    "..YYYYYYYYYY..",
+    "...YYYYYYYY...",
+    "....YYYYYY....",
+    ".....YYYY.....",
+    "......YY......",
+    "............."
+];
+
+// Boss Damaged (HP=1) - Frame A (Blue/Red Tone)
+const SPRITE_BOSS_DMG_A = [
+    "...BB....BB...",
+    "..BBBB..BBBB..",
+    ".BBBBBBBBBBBB.",
+    "BBBBBBBBBBBBBB",
+    "BBRRRRRRRRRRBB",
+    "BRRRRRRRRRRRRB",
+    "RRRRWWRRRRWWRR",
+    "RRRRWWRRRRWWRR",
+    "RRRRRRRRRRRRRR",
+    ".RRRRRRRRRRRR.",
+    "..RRRRRRRRRR..",
+    "...RRRRRRRR...",
+    "....RRRRRR....",
+    ".....RRRR.....",
+    "......RR......",
+    "............."
+];
+
+// Boss Damaged - Frame B
+const SPRITE_BOSS_DMG_B = [
+    "B..BB....BB..B",
+    "BB.BB....BB.BB",
+    "BBBBBBBBBBBBBB",
+    ".BBBBBBBBBBBB.",
+    "BRRRRRRRRRRRRB",
+    "RRRRRRRRRRRRRR",
+    "RRRRWWRRRRWWRR",
+    "RRRRWWRRRRWWRR",
+    "RRRRRRRRRRRRRR",
+    ".RRRRRRRRRRRR.",
+    "..RRRRRRRRRR..",
+    "...RRRRRRRR...",
+    "....RRRRRR....",
+    ".....RRRR.....",
+    "......RR......",
+    "............."
+];
+
+// Goon/Guard (Red/Cyan) - Frame A
+const SPRITE_GOON_A = [
+    "......RR......",
+    ".....RRRR.....",
+    "....RRRRRR....",
+    "...RRRRRRRR...",
+    "..RRCCRRCCRR..",
+    ".RRRRRRRRRRRR.",
+    "RRRRRRRRRRRRRR",
+    "RRRRWWRRWWRRRR",
+    "RRRRWWRRWWRRRR",
+    ".RRRRRRRRRRRR.",
+    "..RRRRRRRRRR..",
+    "...RRRRRRRR...",
+    "....RRRRRR....",
+    ".....RRRR.....",
+    "......RR......",
+    ".............."
+];
+
+// Goon/Guard - Frame B
+const SPRITE_GOON_B = [
+    "R....RRRR....R",
+    "RR..RRRRRR..RR",
+    "RRRRRRRRRRRRRR",
+    ".RRCCRRCCRRCC.",
+    "RRRRRRRRRRRRRR",
+    "RRRRWWRRWWRRRR",
+    "RRRRWWRRWWRRRR",
+    ".RRRRRRRRRRRR.",
+    "..RRRRRRRRRR..",
+    "...RRRRRRRR...",
+    "....RRRRRR....",
+    ".....RRRR.....",
+    "......RR......",
+    ".............."
+];
+
+// Drone (Green/Yellow) - Frame A
+const SPRITE_DRONE_A = [
+    "......GG......",
+    ".....GGGG.....",
+    "....GGGGGG....",
+    "...GGGGGGGG...",
+    "..GGYYGGYYGG..",
+    ".GGGGGGGGGGGG.",
+    "GGGGGGGGGGGGGG",
+    "GGGGWWGGWWGGGG",
+    "GGGGWWGGWWGGGG",
+    ".GGGGGGGGGGGG.",
+    "..GGGGGGGGGG..",
+    "...GGGGGGGG...",
+    "....GGGGGG....",
+    ".....GGGG.....",
+    "......GG......",
+    ".............."
+];
+
+// Drone - Frame B
+const SPRITE_DRONE_B = [
+    "G....GGGG....G",
+    "GG..GGGGGG..GG",
+    "GGGGGGGGGGGGGG",
+    ".GGYYGGYYGGYY.",
+    "GGGGGGGGGGGGGG",
+    "GGGGWWGGWWGGGG",
+    "GGGGWWGGWWGGGG",
+    ".GGGGGGGGGGGG.",
+    "..GGGGGGGGGG..",
+    "...GGGGGGGG...",
+    "....GGGGGG....",
+    ".....GGGG.....",
+    "......GG......",
+    ".............."
+];
+
+// Captured Fighter (Red/Darkgray) - Frame A
+const SPRITE_CAPTURED_A = [
+    ".......DD.......",
+    "......DDDD......",
+    ".....DDDDDD.....",
+    ".....DRDDRD.....",
+    ".....DRDDRD.....",
+    "....DDDDDDDD....",
+    "...DDDDDDDDDD...",
+    "..DDDDRRRRDDDD..",
+    ".DDDDRRRRRRDDDD.",
+    "DDDDDDDDDDDDDDDD",
+    "DDD...DDDD...DDD",
+    "DD....DDDD....DD",
+    "D.....DDDD.....D",
+    "D......DD......D",
+    ".......DD.......",
+    ".......DD......."
+];
+
+// --- 2. Drawing Parser Function ---
+function drawPixelSprite(ctx, sprite, x, y, scale = 2, angle = 0, isFlipped = false) {
+    if (!sprite) return;
+    const rows = sprite.length;
+    const cols = sprite[0].length;
+
+    ctx.save();
+    ctx.translate(x + (cols * scale) / 2, y + (rows * scale) / 2);
+    if (angle !== 0) {
+        ctx.rotate(angle);
+    }
+    if (isFlipped) {
+        ctx.scale(1, -1);
+    }
+
+    const offsetX = -(cols * scale) / 2;
+    const offsetY = -(rows * scale) / 2;
+
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            const char = sprite[r][c];
+            if (char === '.' || char === ' ') continue;
+
+            ctx.fillStyle = PALETTE[char] || '#FFFFFF';
+            ctx.fillRect(
+                offsetX + c * scale,
+                offsetY + r * scale,
+                scale,
+                scale
+            );
+        }
+    }
+    ctx.restore();
+}
+
+// --- 3. Audio Synthesizer (Web Audio API) ---
+class AudioManager {
+    constructor() {
+        this.ctx = null;
+        this.beamNodes = null;
+        this.activeBGMNodes = []; // 현재 연주 중인 노드 리스트
+    }
+
+    init() {
+        if (this.ctx) return;
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        this.ctx = new AudioContextClass();
+    }
+
+    resume() {
+        this.init();
+        if (this.ctx && this.ctx.state === 'suspended') {
+            this.ctx.resume();
+        }
+    }
+
+    createNoiseBuffer(duration) {
+        if (!this.ctx) return null;
+        const bufferSize = this.ctx.sampleRate * duration;
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+            data[i] = Math.random() * 2 - 1;
+        }
+        return buffer;
+    }
+
+    playLaser() {
+        this.resume();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.exponentialRampToValueAtTime(110, now + 0.12);
+
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.12);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.12);
+    }
+
+    playExplosion(isBoss) {
+        this.resume();
+        if (!this.ctx) return;
+        const duration = isBoss ? 0.4 : 0.2;
+        const buffer = this.createNoiseBuffer(duration);
+        if (!buffer) return;
+
+        const now = this.ctx.currentTime;
+        const noiseNode = this.ctx.createBufferSource();
+        noiseNode.buffer = buffer;
+
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = isBoss ? 'lowpass' : 'bandpass';
+        filter.frequency.setValueAtTime(isBoss ? 200 : 400, now);
+
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(isBoss ? 0.6 : 0.4, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+
+        noiseNode.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        noiseNode.start(now);
+        noiseNode.stop(now + duration);
+    }
+
+    startTractorBeam() {
+        this.resume();
+        if (!this.ctx || this.beamNodes) return;
+        const now = this.ctx.currentTime;
+
+        const carrier = this.ctx.createOscillator();
+        const modulator = this.ctx.createOscillator();
+        const modGain = this.ctx.createGain();
+        const mainGain = this.ctx.createGain();
+
+        carrier.type = 'sine';
+        carrier.frequency.setValueAtTime(220, now);
+
+        modulator.type = 'sine';
+        modulator.frequency.setValueAtTime(6, now);
+
+        modGain.gain.setValueAtTime(80, now); // FM Depth
+
+        mainGain.gain.setValueAtTime(0.2, now);
+
+        modulator.connect(modGain);
+        modGain.connect(carrier.frequency);
+        carrier.connect(mainGain);
+        mainGain.connect(this.ctx.destination);
+
+        modulator.start(now);
+        carrier.start(now);
+
+        this.beamNodes = { carrier, modulator, mainGain };
+    }
+
+    stopTractorBeam() {
+        if (!this.ctx || !this.beamNodes) return;
+        const now = this.ctx.currentTime;
+        const { carrier, modulator, mainGain } = this.beamNodes;
+
+        mainGain.gain.cancelScheduledValues(now);
+        mainGain.gain.setValueAtTime(mainGain.gain.value, now);
+        mainGain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+
+        carrier.stop(now + 0.1);
+        modulator.stop(now + 0.1);
+        this.beamNodes = null;
+    }
+
+    stopAllBGM() {
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        this.activeBGMNodes.forEach(node => {
+            try {
+                node.stop(now);
+            } catch (e) {
+                // 이미 종료된 노드 예외 처리
+            }
+        });
+        this.activeBGMNodes = [];
+    }
+
+    playBGM(type) {
+        this.resume();
+        if (!this.ctx) return;
+        
+        this.stopAllBGM(); // 새로운 BGM 시작 전 이전 멜로디 오실레이터 제거
+        
+        const now = this.ctx.currentTime;
+
+        let notes = [];
+        if (type === 'start') {
+            notes = [
+                [392.00, 0.15], [523.25, 0.15], [392.00, 0.15], [329.63, 0.15],
+                [392.00, 0.08], [392.00, 0.08], [523.25, 0.3]
+            ];
+        } else if (type === 'gameover') {
+            notes = [
+                [523.25, 0.2], [493.88, 0.2], [440.00, 0.2], [392.00, 0.5]
+            ];
+        } else if (type === 'stageclear') {
+            notes = [
+                [523.25, 0.1], [587.33, 0.1], [659.25, 0.1], [783.99, 0.2],
+                [659.25, 0.1], [783.99, 0.3]
+            ];
+        } else if (type === 'lifeup') {
+            notes = [
+                [523.25, 0.08], [659.25, 0.08], [783.99, 0.08], [1046.50, 0.15]
+            ];
+        }
+
+        let playTime = now;
+        notes.forEach(([freq, duration]) => {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(freq, playTime);
+
+            gain.gain.setValueAtTime(0.12, playTime);
+            gain.gain.setValueAtTime(0.12, playTime + duration - 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.001, playTime + duration);
+
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+
+            osc.start(playTime);
+            osc.stop(playTime + duration);
+
+            this.activeBGMNodes.push(osc); // 트래킹 등록
+
+            playTime += duration;
+        });
+    }
+}
+
+const audioManager = new AudioManager();
+
+// --- 4. Object Pools ---
+class ObjectPool {
+    constructor(createFn, cleanFn, initialSize = 50) {
+        this.createFn = createFn;
+        this.cleanFn = cleanFn;
+        this.pool = [];
+        for (let i = 0; i < initialSize; i++) {
+            this.pool.push(this.createFn());
+        }
+    }
+
+    acquire(...args) {
+        let obj = this.pool.length > 0 ? this.pool.pop() : this.createFn();
+        this.cleanFn(obj, ...args);
+        return obj;
+    }
+
+    release(obj) {
+        this.pool.push(obj);
+    }
+}
+
+// --- 5. Base Entity Class ---
+class Entity {
+    constructor(x, y, width, height, vx = 0, vy = 0) {
+        this.x = x;
+        this.y = y;
+        this.width = width;
+        this.height = height;
+        this.vx = vx;
+        this.vy = vy;
+        this.isDead = false;
+    }
+
+    update(dt) {
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+    }
+
+    getBounds() {
+        return { x: this.x, y: this.y, width: this.width, height: this.height };
+    }
+}
+
+// --- 6. Projectile & Particle Classes ---
+class Projectile extends Entity {
+    constructor() {
+        super(0, 0, 4, 16);
+        this.owner = ""; // "PLAYER", "ENEMY"
+        this.angle = 0;
+    }
+
+    reset(owner, x, y, angle, speed) {
+        this.owner = owner;
+        this.x = x;
+        this.y = y;
+        this.angle = angle;
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed;
+        this.width = 4;
+        this.height = owner === "PLAYER" ? 16 : 12;
+        this.isDead = false;
+    }
+
+    draw(ctx) {
+        ctx.fillStyle = this.owner === "PLAYER" ? "#00FFFF" : "#FF5555";
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+    }
+}
+
+class Particle extends Entity {
+    constructor() {
+        super(0, 0, 3, 3);
+        this.color = "#FFFFFF";
+        this.life = 0;
+        this.maxLife = 0;
+    }
+
+    reset(x, y, vx, vy, color, size, life) {
+        this.x = x;
+        this.y = y;
+        this.vx = vx;
+        this.vy = vy;
+        this.width = size;
+        this.height = size;
+        this.color = color;
+        this.life = life;
+        this.maxLife = life;
+        this.isDead = false;
+    }
+
+    update(dt) {
+        super.update(dt);
+        // Apply friction and light gravity/drift
+        this.vx *= Math.exp(-0.8 * dt);
+        this.vy *= Math.exp(-0.8 * dt);
+        this.life -= dt;
+        if (this.life <= 0) {
+            this.isDead = true;
+        }
+    }
+
+    draw(ctx) {
+        ctx.save();
+        const alpha = Math.max(0, this.life / this.maxLife);
+        ctx.fillStyle = this.color;
+        ctx.globalAlpha = alpha;
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+        ctx.restore();
+    }
+}
+
+// Instantiate Pools
+const projectilePool = new ObjectPool(
+    () => new Projectile(),
+    (p, owner, x, y, angle, speed) => p.reset(owner, x, y, angle, speed),
+    50
+);
+
+const particlePool = new ObjectPool(
+    () => new Particle(),
+    (pt, x, y, vx, vy, color, size, life) => pt.reset(x, y, vx, vy, color, size, life),
+    100
+);
+
+// --- 7. Player Class ---
+class Player extends Entity {
+    constructor(x, y) {
+        super(x, y, 32, 32); // Default single width: 32, height: 32
+        this.isDual = false;
+        this.shootCooldown = 0;
+        this.shootDelay = 0.25;
+
+        // Capture/Tractor states
+        this.isCaptured = false;
+        this.captureTargetY = 300;
+        this.captureAngle = 0;
+        this.captureScale = 2;
+
+        // Invulnerability
+        this.isInvulnerable = false;
+        this.invulnerableTimer = 0;
+    }
+
+    move(direction, dt) {
+        if (this.isCaptured) return;
+        const speed = 250; // px/sec
+        this.vx = direction * speed;
+    }
+
+    shoot(projectilesList, gameInstance) {
+        if (this.isCaptured || this.shootCooldown > 0) return;
+
+        if (this.isDual) {
+            // Dual fire from left and right wings
+            const leftBullet = projectilePool.acquire("PLAYER", this.x + 8, this.y, -Math.PI / 2, 450);
+            const rightBullet = projectilePool.acquire("PLAYER", this.x + 48, this.y, -Math.PI / 2, 450);
+            projectilesList.push(leftBullet, rightBullet);
+            gameInstance.shotsFired += 2;
+        } else {
+            // Single fire from center
+            const centerBullet = projectilePool.acquire("PLAYER", this.x + 14, this.y, -Math.PI / 2, 450);
+            projectilesList.push(centerBullet);
+            gameInstance.shotsFired += 1;
+        }
+
+        audioManager.playLaser();
+        this.shootCooldown = this.shootDelay;
+    }
+
+    hit() {
+        if (this.isInvulnerable || this.isCaptured) return false;
+
+        if (this.isDual) {
+            this.isDual = false;
+            this.width = 32;
+            this.isInvulnerable = true;
+            this.invulnerableTimer = 2.0;
+            return false; // Player survives but loses dual fighter
+        }
+
+        this.isDead = true;
+        return true; // Completely hit and dead
+    }
+
+    update(dt) {
+        if (this.isCaptured) {
+            this.vx = 0;
+            this.vy = 0;
+            return;
+        }
+
+        super.update(dt);
+        this.vx = 0; // Reset velocity each frame
+
+        // Limit boundaries
+        const boundaryMax = 448 - this.width;
+        if (this.x < 0) this.x = 0;
+        if (this.x > boundaryMax) this.x = boundaryMax;
+
+        if (this.shootCooldown > 0) this.shootCooldown -= dt;
+
+        if (this.isInvulnerable) {
+            this.invulnerableTimer -= dt;
+            if (this.invulnerableTimer <= 0) {
+                this.isInvulnerable = false;
+            }
+        }
+    }
+
+    draw(ctx) {
+        // Flashing animation during invulnerability
+        if (this.isInvulnerable && Math.floor(Date.now() / 100) % 2 === 0) {
+            return;
+        }
+
+        if (this.isCaptured) {
+            // Spin and shrink while being captured
+            drawPixelSprite(ctx, SPRITE_PLAYER, this.x, this.y, this.captureScale, this.captureAngle);
+            return;
+        }
+
+        if (this.isDual) {
+            // Draw left fighter
+            drawPixelSprite(ctx, SPRITE_PLAYER, this.x, this.y, 2);
+            // Draw right fighter
+            drawPixelSprite(ctx, SPRITE_PLAYER, this.x + 32, this.y, 2);
+        } else {
+            drawPixelSprite(ctx, SPRITE_PLAYER, this.x, this.y, 2);
+        }
+    }
+}
+
+// --- 8. Docking Fighter Class (Free Falling for Merge) ---
+class DockingFighter extends Entity {
+    constructor(x, y) {
+        super(x, y, 32, 32);
+        this.angle = 0;
+        this.anchorX = x;
+        this.timer = 0;
+    }
+
+    update(dt, playerX) {
+        this.timer += dt;
+        this.y += 100 * dt; // Descend slowly
+        this.angle += 4 * dt; // Rotate while falling
+
+        // Swing horizontally and slide towards player x position
+        this.anchorX += (playerX - this.anchorX) * 2 * dt;
+        this.x = this.anchorX + Math.sin(this.timer * 8) * 30;
+
+        if (this.y > 512) {
+            this.isDead = true;
+        }
+    }
+
+    draw(ctx) {
+        drawPixelSprite(ctx, SPRITE_PLAYER, this.x, this.y, 2, this.angle);
+    }
+}
+
+// --- 9. Enemy Class ---
+class Enemy extends Entity {
+    constructor(type, gridRow, gridCol, originX, originY) {
+        super(0, 0, 32, 32);
+        this.type = type; // "BOSS", "GOON", "DRONE", "CAPTURED_FIGHTER"
+        this.gridRow = gridRow;
+        this.gridCol = gridCol;
+        this.originX = originX;
+        this.originY = originY;
+
+        this.hp = type === "BOSS" ? 2 : 1;
+        this.enemyState = "ENTERING"; // "ENTERING", "FORMATION", "DIVING", "TRACTOR_BEAM", "RETURNING"
+        
+        this.t = 0;
+        this.pathPoints = [];
+        this.speedMultiplier = 1.0;
+        this.diveTimer = 0;
+        this.tractorBeamTimer = 0;
+        this.animationTimer = 0;
+        this.frame = 0;
+
+        // Capturing mechanics
+        this.hasCapturedFighter = false;
+        this.capturedFighterRef = null;
+        this.divePhase = 0;
+        this.diveAngle = 0;
+    }
+
+    setPath(p0, p1, p2, p3) {
+        this.pathPoints = [p0, p1, p2, p3];
+        this.t = 0;
+        this.x = p0.x;
+        this.y = p0.y;
+    }
+
+    hit() {
+        this.hp--;
+        if (this.hp <= 0) {
+            this.isDead = true;
+            return true;
+        }
+        return false;
+    }
+
+    update(dt, gameTime, formationOffsetX, playerX, playerY) {
+        // Handle animation frame
+        this.animationTimer += dt;
+        if (this.animationTimer > 0.25) {
+            this.animationTimer = 0;
+            this.frame = 1 - this.frame;
+        }
+
+        switch (this.enemyState) {
+            case "ENTERING": {
+                if (this.pathPoints.length === 4) {
+                    this.t += dt * this.speedMultiplier * 0.375;
+                    if (this.t >= 1.0) {
+                        this.t = 1.0;
+                        this.enemyState = "FORMATION";
+                    }
+                    const p = this.getBezierPoint(this.t);
+                    this.x = p.x;
+                    this.y = p.y;
+                }
+                break;
+            }
+            case "FORMATION": {
+                // Sway in formation
+                this.x = this.originX + formationOffsetX;
+                this.y = this.originY;
+                break;
+            }
+            case "DIVING": {
+                this.diveTimer += dt;
+                
+                if (this.type === "BOSS" && this.divePhase === 0) {
+                    // Dive downwards, targeting Tractor Beam threshold at Y = 240
+                    const angleToPlayer = Math.atan2(240 - this.y, playerX - this.x);
+                    this.vx = Math.cos(angleToPlayer) * 150;
+                    this.vy = 160;
+                    super.update(dt);
+
+                    if (this.y >= 240) {
+                        this.y = 240;
+                        this.vx = 0;
+                        this.vy = 0;
+                        if (!this.hasCapturedFighter && Math.random() < 0.6) {
+                            this.enemyState = "TRACTOR_BEAM";
+                            this.tractorBeamTimer = 0;
+                            audioManager.startTractorBeam();
+                        } else {
+                            this.divePhase = 1; // Skip beam
+                        }
+                    }
+                } else {
+                    // Standard Dive / Dive Phase 1 (Goon, Drone, Boss with fighter)
+                    // Spiral swoop downwards towards player
+                    const frequency = 4.0;
+                    this.vx = Math.sin(this.diveTimer * frequency) * 120 + (playerX - this.x) * 0.5;
+                    this.vy = 180;
+                    super.update(dt);
+                }
+
+                // Warp back to top if off screen bottom
+                if (this.y > 520) {
+                    this.y = -40;
+                    this.x = 224;
+                    this.enemyState = "RETURNING";
+                }
+                break;
+            }
+            case "TRACTOR_BEAM": {
+                this.tractorBeamTimer += dt;
+                // Stay still and hold tractor beam
+                if (this.tractorBeamTimer >= 5.0) { // 5 seconds beam duration
+                    this.enemyState = "DIVING";
+                    this.divePhase = 1;
+                    audioManager.stopTractorBeam();
+                }
+                break;
+            }
+            case "RETURNING": {
+                // Guide back to formation spot
+                const targetX = this.originX + formationOffsetX;
+                const targetY = this.originY;
+                const dx = targetX - this.x;
+                const dy = targetY - this.y;
+                const dist = Math.hypot(dx, dy);
+
+                if (dist < 5) {
+                    this.x = targetX;
+                    this.y = targetY;
+                    this.enemyState = "FORMATION";
+                } else {
+                    const speed = 200;
+                    this.vx = (dx / dist) * speed;
+                    this.vy = (dy / dist) * speed;
+                    super.update(dt);
+                }
+                break;
+            }
+        }
+
+        // Keep captured fighter bound on top of the boss
+        if (this.hasCapturedFighter && this.capturedFighterRef) {
+            if (this.capturedFighterRef.isDead) {
+                this.hasCapturedFighter = false;
+                this.capturedFighterRef = null;
+            } else {
+                this.capturedFighterRef.x = this.x;
+                this.capturedFighterRef.y = this.y - 24; // Sit on top of boss
+            }
+        }
+    }
+
+    getBezierPoint(t) {
+        const p0 = this.pathPoints[0];
+        const p1 = this.pathPoints[1];
+        const p2 = this.pathPoints[2];
+        const p3 = this.pathPoints[3];
+
+        const u = 1 - t;
+        const tt = t * t;
+        const uu = u * u;
+        const uuu = uu * u;
+        const ttt = tt * t;
+
+        const x = uuu * p0.x + 3 * uu * t * p1.x + 3 * u * tt * p2.x + ttt * p3.x;
+        const y = uuu * p0.y + 3 * uu * t * p1.y + 3 * u * tt * p2.y + ttt * p3.y;
+
+        return { x, y };
+    }
+
+    draw(ctx) {
+        let currentSprite = null;
+        if (this.type === "BOSS") {
+            if (this.hp === 2) {
+                currentSprite = this.frame === 0 ? SPRITE_BOSS_A : SPRITE_BOSS_B;
+            } else {
+                currentSprite = this.frame === 0 ? SPRITE_BOSS_DMG_A : SPRITE_BOSS_DMG_B;
+            }
+        } else if (this.type === "GOON") {
+            currentSprite = this.frame === 0 ? SPRITE_GOON_A : SPRITE_GOON_B;
+        } else if (this.type === "DRONE") {
+            currentSprite = this.frame === 0 ? SPRITE_DRONE_A : SPRITE_DRONE_B;
+        } else if (this.type === "CAPTURED_FIGHTER") {
+            currentSprite = SPRITE_CAPTURED_A;
+        }
+
+        if (currentSprite) {
+            // Draw regular sprite
+            drawPixelSprite(ctx, currentSprite, this.x, this.y, 2);
+        }
+
+        // Draw tractor beam if in state
+        if (this.enemyState === "TRACTOR_BEAM") {
+            this.drawTractorBeam(ctx);
+        }
+    }
+
+    drawTractorBeam(ctx) {
+        ctx.save();
+        // Alternating alpha wave for retro flickering effect
+        const alpha = 0.35 + Math.sin(Date.now() / 50) * 0.15;
+        
+        const xb = this.x + this.width / 2;
+        const yb = this.y + this.height;
+        const beamHeight = 150;
+
+        // Draw outer translucent trapezoid
+        const gradient = ctx.createLinearGradient(xb, yb, xb, yb + beamHeight);
+        gradient.addColorStop(0, `rgba(0, 220, 255, ${alpha})`);
+        gradient.addColorStop(0.5, `rgba(0, 150, 255, ${alpha * 0.7})`);
+        gradient.addColorStop(1, `rgba(0, 50, 255, 0)`);
+
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.moveTo(xb - 16, yb);
+        ctx.lineTo(xb + 16, yb);
+        ctx.lineTo(xb + 48, yb + beamHeight);
+        ctx.lineTo(xb - 48, yb + beamHeight);
+        ctx.closePath();
+        ctx.fill();
+
+        // Horizontal flickering laser energy bands
+        ctx.strokeStyle = `rgba(255, 255, 255, ${alpha + 0.15})`;
+        ctx.lineWidth = 1.5;
+        const timeOffset = (Date.now() / 6) % 150;
+        for (let offset = 0; offset < beamHeight; offset += 20) {
+            const waveY = yb + ((offset + timeOffset) % beamHeight);
+            if (waveY >= yb + beamHeight) continue;
+
+            const progress = (waveY - yb) / beamHeight;
+            const wHalf = 16 + (32 * progress); // Linear widening half-width
+
+            ctx.beginPath();
+            ctx.moveTo(xb - wHalf, waveY);
+            ctx.lineTo(xb + wHalf, waveY);
+            ctx.stroke();
+        }
+
+        ctx.restore();
+    }
+}
+
+// --- 10. Starfield Class ---
+class Starfield {
+    constructor(numStars = 60) {
+        this.stars = [];
+        for (let i = 0; i < numStars; i++) {
+            this.stars.push({
+                x: Math.random() * 448,
+                y: Math.random() * 512,
+                speed: Math.random() * 40 + 20, // px/sec
+                color: this.getRandomColor()
+            });
+        }
+    }
+
+    getRandomColor() {
+        const colors = ["#FFFFFF", "#FFFF55", "#55FFFF", "#FF55FF", "#55FF55"];
+        return colors[Math.floor(Math.random() * colors.length)];
+    }
+
+    update(dt) {
+        this.stars.forEach(star => {
+            star.y += star.speed * dt;
+            if (star.y > 512) {
+                star.y = 0;
+                star.x = Math.random() * 448;
+            }
+        });
+    }
+
+    draw(ctx) {
+        this.stars.forEach(star => {
+            ctx.fillStyle = star.color;
+            ctx.fillRect(star.x, star.y, 2, 2);
+        });
+    }
+}
+
+// --- 11. Main Game Controller (Game Engine) ---
+class Game {
+    constructor() {
+        this.canvas = document.getElementById("gameCanvas");
+        this.ctx = this.canvas.getContext("2d");
+        this.state = "INTRO"; // FSM
+
+        this.score = 0;
+        this.highScore = parseInt(localStorage.getItem("galaga_high_score")) || 20000;
+        this.stage = 1;
+        this.lives = 3;
+
+        this.player = null;
+        this.enemies = [];
+        this.projectiles = [];
+        this.particles = [];
+        this.dockingFighters = []; // Docking sequence array
+
+        // Background
+        this.starfield = new Starfield(60);
+
+        // Control Inputs
+        this.keys = {};
+        this.gameTime = 0;
+
+        // Level Wave/Spawn Queues
+        this.spawnQueue = [];
+        this.spawnTimer = 0;
+        this.spawnInterval = 0.16; // 0.16s delay between consecutive enemy entries
+
+        // Waves timing
+        this.waveTimer = 0;
+        this.waveIndex = 0;
+        this.activeWaves = false;
+
+        // Statistics/Clear
+        this.stageClearTimer = 0;
+        this.shotsFired = 0;
+        this.shotsHit = 0;
+
+        // Respawn cooldown
+        this.respawnTimer = 0;
+        
+        // Dive selection interval
+        this.diveAttackTimer = 0;
+
+        this.lastTime = 0;
+    }
+
+    init() {
+        // Keyboard bindings
+        window.addEventListener("keydown", e => {
+            this.keys[e.key] = true;
+            if (e.key === "Enter" || e.key === " ") {
+                audioManager.resume();
+            }
+            if (e.key === "Enter") {
+                if (this.state === "INTRO") {
+                    this.startGame();
+                } else if (this.state === "GAME_OVER") {
+                    this.state = "INTRO";
+                }
+            }
+            if (e.key === "p" || e.key === "P") {
+                if (this.state === "PLAYING") {
+                    this.state = "PAUSED";
+                } else if (this.state === "PAUSED") {
+                    this.state = "PLAYING";
+                }
+            }
+        });
+
+        window.addEventListener("keyup", e => {
+            this.keys[e.key] = false;
+        });
+
+        // Touch Control bindings for Virtual Pad
+        const leftBtn = document.getElementById("left-btn");
+        const rightBtn = document.getElementById("right-btn");
+        const fireBtn = document.getElementById("fire-btn");
+
+        const setupTouch = (el, keyName) => {
+            el.addEventListener("touchstart", (e) => {
+                e.preventDefault();
+                audioManager.resume();
+                this.keys[keyName] = true;
+                if (this.state === "INTRO") {
+                    this.startGame();
+                } else if (this.state === "GAME_OVER") {
+                    this.state = "INTRO";
+                }
+            });
+            el.addEventListener("touchend", (e) => {
+                e.preventDefault();
+                this.keys[keyName] = false;
+            });
+            el.addEventListener("touchcancel", (e) => {
+                e.preventDefault();
+                this.keys[keyName] = false;
+            });
+        };
+
+        setupTouch(leftBtn, "ArrowLeft");
+        setupTouch(rightBtn, "ArrowRight");
+        setupTouch(fireBtn, " ");
+    }
+
+    startGame() {
+        this.score = 0;
+        this.lives = 3;
+        this.stage = 1;
+        this.shotsFired = 0;
+        this.shotsHit = 0;
+        this.enemies = [];
+        this.projectiles = [];
+        this.particles = [];
+        this.dockingFighters = [];
+
+        this.initStage(this.stage);
+        audioManager.playBGM("start");
+        this.state = "PLAYING";
+    }
+
+    initStage(stageNum) {
+        this.enemies = [];
+        this.projectiles = [];
+        this.dockingFighters = [];
+        this.spawnQueue = [];
+        this.activeWaves = true;
+        this.waveIndex = 0;
+        this.waveTimer = 0;
+        this.diveAttackTimer = 3.0;
+
+        // Instantiate Player
+        this.player = new Player(224 - 16, 450);
+        this.player.isInvulnerable = true;
+        this.player.invulnerableTimer = 2.0;
+
+        // Generate Stage Formations Layout (10 columns, 5 rows)
+        // Col Spacing: 36px, Row Spacing: 28px
+        const startY = 60;
+        const colWidth = 36;
+        const totalCols = 10;
+        const totalWidth = (totalCols - 1) * colWidth;
+        const startX = (448 - totalWidth - 32) / 2; // Center offset
+
+        const formationGrid = [];
+        for (let r = 0; r < 5; r++) {
+            formationGrid[r] = [];
+            for (let c = 0; c < 10; c++) {
+                let type = "DRONE";
+                if (r === 0) type = "BOSS";
+                else if (r === 1 || r === 2) type = "GOON";
+
+                // Bosses centered in row 0
+                if (r === 0 && (c < 3 || c > 6)) {
+                    formationGrid[r][c] = null;
+                    continue;
+                }
+                // Goons centered in row 1-2
+                if ((r === 1 || r === 2) && (c < 1 || c > 8)) {
+                    formationGrid[r][c] = null;
+                    continue;
+                }
+
+                const ox = startX + c * colWidth;
+                const oy = startY + r * 28;
+                formationGrid[r][c] = { type, gridRow: r, gridCol: c, ox, oy };
+            }
+        }
+
+        // Build Entrance waves (Groups of 8)
+        // Group 1: 4 Bosses + 4 Goons (Swoop from Left Top)
+        const group1 = [];
+        for (let c = 3; c <= 6; c++) {
+            if (formationGrid[0][c]) group1.push(formationGrid[0][c]);
+        }
+        for (let c = 3; c <= 6; c++) {
+            if (formationGrid[1][c]) group1.push(formationGrid[1][c]);
+        }
+        this.enqueueGroup(group1, "LEFT_TOP");
+
+        // Group 2: 8 Goons (Swoop from Right Top)
+        const group2 = [];
+        for (let c = 1; c <= 8; c++) {
+            if (c < 3 || c > 6) {
+                if (formationGrid[1][c]) group2.push(formationGrid[1][c]);
+            }
+        }
+        for (let c = 2; c <= 7; c++) {
+            if (formationGrid[2][c]) group2.push(formationGrid[2][c]);
+        }
+        this.enqueueGroup(group2, "RIGHT_TOP");
+
+        // Group 3: 8 Drones (Swoop from Left Bottom)
+        const group3 = [];
+        for (let c = 0; c < 8; c++) {
+            if (formationGrid[3][c]) group3.push(formationGrid[3][c]);
+        }
+        this.enqueueGroup(group3, "LEFT_BOTTOM");
+
+        // Group 4: 8 Drones (Swoop from Right Bottom)
+        const group4 = [];
+        for (let c = 2; c < 10; c++) {
+            if (formationGrid[4][c]) group4.push(formationGrid[4][c]);
+        }
+        this.enqueueGroup(group4, "RIGHT_BOTTOM");
+
+        // Group 5: Remaining elements (Swoop from Center Top)
+        const group5 = [];
+        // Catch any leftovers in grid
+        for (let r = 0; r < 5; r++) {
+            for (let c = 0; c < 10; c++) {
+                const item = formationGrid[r][c];
+                if (item) {
+                    // Check if already queued
+                    let alreadyQueued = false;
+                    for (let g = 0; g < this.spawnQueue.length; g++) {
+                        if (this.spawnQueue[g].some(x => x.gridRow === r && x.gridCol === c)) {
+                            alreadyQueued = true;
+                            break;
+                        }
+                    }
+                    if (!alreadyQueued) {
+                        group5.push(item);
+                    }
+                }
+            }
+        }
+        if (group5.length > 0) {
+            this.enqueueGroup(group5, "CENTER_TOP");
+        }
+    }
+
+    enqueueGroup(items, entranceType) {
+        const speedMult = 1.0 + (this.stage * 0.05);
+        const groupArr = items.map((item, idx) => {
+            const enemy = new Enemy(item.type, item.gridRow, item.gridCol, item.ox, item.oy);
+            enemy.speedMultiplier = speedMult;
+
+            // Generate Path Points based on group type and sequence order
+            let p0, p1, p2, p3;
+            p3 = { x: item.ox, y: item.oy };
+
+            const delayOffset = idx * 60; // Spread entry spacing visually
+            if (entranceType === "LEFT_TOP") {
+                p0 = { x: -40, y: 100 - delayOffset };
+                p1 = { x: 160, y: 120 };
+                p2 = { x: 260, y: 320 };
+            } else if (entranceType === "RIGHT_TOP") {
+                p0 = { x: 488, y: 100 - delayOffset };
+                p1 = { x: 288, y: 120 };
+                p2 = { x: 188, y: 320 };
+            } else if (entranceType === "LEFT_BOTTOM") {
+                p0 = { x: -40, y: 420 + delayOffset };
+                p1 = { x: 220, y: 380 };
+                p2 = { x: 120, y: 140 };
+            } else if (entranceType === "RIGHT_BOTTOM") {
+                p0 = { x: 488, y: 420 + delayOffset };
+                p1 = { x: 228, y: 380 };
+                p2 = { x: 328, y: 140 };
+            } else { // CENTER_TOP
+                p0 = { x: 224, y: -40 - delayOffset };
+                p1 = { x: 100, y: 120 };
+                p2 = { x: 348, y: 220 };
+            }
+
+            enemy.setPath(p0, p1, p2, p3);
+            return enemy;
+        });
+
+        this.spawnQueue.push(groupArr);
+    }
+
+    start() {
+        this.lastTime = performance.now();
+        requestAnimationFrame(this.loop.bind(this));
+    }
+
+    loop(timestamp) {
+        let dt = (timestamp - this.lastTime) / 1000;
+        this.lastTime = timestamp;
+
+        // Cap deltaTime to avoid spikes
+        if (dt > 0.1) dt = 0.1;
+
+        this.update(dt);
+        this.draw();
+
+        requestAnimationFrame(this.loop.bind(this));
+    }
+
+    update(dt) {
+        this.gameTime += dt;
+        this.starfield.update(dt);
+
+        // 폭발 이펙트 물리 갱신은 LEVEL_CLEAR 상태에서도 계속 활발히 흐르도록 물리 루프 상단에 위치
+        this.particles.forEach(pt => pt.update(dt));
+
+        // Sweep Dead particles
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            if (this.particles[i].isDead) {
+                particlePool.release(this.particles[i]);
+                this.particles.splice(i, 1);
+            }
+        }
+
+        if (this.state !== "PLAYING") {
+            if (this.state === "LEVEL_CLEAR") {
+                this.stageClearTimer -= dt;
+                if (this.stageClearTimer <= 0) {
+                    this.stage++;
+                    this.initStage(this.stage);
+                    this.state = "PLAYING";
+                }
+            }
+            return;
+        }
+
+        // Active Player inputs
+        let direction = 0;
+        if (this.keys["ArrowLeft"]) direction = -1;
+        if (this.keys["ArrowRight"]) direction = 1;
+        
+        if (this.player && !this.player.isDead) {
+            this.player.move(direction, dt);
+            this.player.update(dt);
+
+            if (this.keys[" "]) {
+                this.player.shoot(this.projectiles, this);
+            }
+        } else if (!this.player || this.player.isDead) {
+            // Respawn handler
+            this.respawnTimer -= dt;
+            if (this.respawnTimer <= 0) {
+                if (this.lives > 0) {
+                    this.player = new Player(224 - 16, 450);
+                    this.player.isInvulnerable = true;
+                    this.player.invulnerableTimer = 2.0;
+                } else {
+                    this.changeToGameOver();
+                }
+            }
+        }
+
+        // Sway formation offset x
+        const formationOffsetX = Math.sin(this.gameTime * 2.2) * 24;
+
+        // Process Entrance Waves Spawning
+        if (this.activeWaves && this.spawnQueue.length > 0) {
+            this.waveTimer += dt;
+            // Spawn next wave group every 3.8s
+            if (this.waveTimer >= 3.8 || this.waveIndex === 0) {
+                this.waveTimer = 0;
+                const waveGroup = this.spawnQueue[this.waveIndex];
+                if (waveGroup) {
+                    waveGroup.forEach(enemy => {
+                        this.enemies.push(enemy);
+                    });
+                    this.waveIndex++;
+                }
+                if (this.waveIndex >= this.spawnQueue.length) {
+                    this.activeWaves = false;
+                }
+            }
+        }
+
+        // Update enemies
+        const playerX = this.player ? this.player.x + this.player.width / 2 : 224;
+        const playerY = this.player ? this.player.y : 450;
+
+        this.enemies.forEach(enemy => {
+            enemy.update(dt, this.gameTime, formationOffsetX, playerX, playerY);
+
+            // Logic to check player capture when beam is active
+            if (enemy.enemyState === "TRACTOR_BEAM" && this.player && !this.player.isDead && !this.player.isCaptured && !this.player.isInvulnerable) {
+                // Check if player is within trapezoidal area
+                const xb = enemy.x + enemy.width / 2;
+                const yb = enemy.y + enemy.height;
+                const px = this.player.x + this.player.width / 2;
+                const py = this.player.y;
+
+                const beamHeight = 150;
+                if (py >= yb && py <= yb + beamHeight) {
+                    const progress = (py - yb) / beamHeight;
+                    const wHalf = 16 + (32 * progress);
+                    if (Math.abs(px - xb) <= wHalf) {
+                        // Capture triggered!
+                        this.player.isCaptured = true;
+                        this.player.captureScale = 2.0;
+                        this.player.captureAngle = 0;
+                        // Turn off beam loop sound & release
+                        audioManager.stopTractorBeam();
+                    }
+                }
+            }
+
+            // Let diving enemies fire occasionally
+            if (enemy.enemyState === "DIVING" && Math.random() < 0.008) {
+                const angle = Math.atan2(playerY - enemy.y, playerX - enemy.x);
+                const enemyBullet = projectilePool.acquire("ENEMY", enemy.x + 14, enemy.y + 32, angle, 240);
+                this.projectiles.push(enemyBullet);
+            }
+        });
+
+        // Handle tractor beam pull animation sequence
+        if (this.player && this.player.isCaptured) {
+            // Find the boss capturing the player
+            const boss = this.enemies.find(e => e.enemyState === "TRACTOR_BEAM" || (e.type === "BOSS" && e.enemyState === "DIVING"));
+            if (boss) {
+                const targetX = boss.x + boss.width / 2 - this.player.width / 2;
+                const targetY = boss.y + boss.height + 10;
+
+                // Move slowly towards docking point
+                this.player.x += (targetX - this.player.x) * 3 * dt;
+                this.player.y += (targetY - this.player.y) * 3 * dt;
+                this.player.captureAngle += 6 * dt;
+                this.player.captureScale -= 0.2 * dt;
+                if (this.player.captureScale < 1.0) this.player.captureScale = 1.0;
+
+                const dist = Math.hypot(targetX - this.player.x, targetY - this.player.y);
+                if (dist < 4) {
+                    // Docking complete. Captured!
+                    boss.hasCapturedFighter = true;
+                    // Create captured fighter enemy subtype
+                    const capturedEnemy = new Enemy("CAPTURED_FIGHTER", -1, -1, 0, 0);
+                    capturedEnemy.enemyState = "FORMATION";
+                    boss.capturedFighterRef = capturedEnemy;
+                    this.enemies.push(capturedEnemy);
+
+                    this.lives--;
+                    this.player = null;
+                    this.respawnTimer = 1.8;
+
+                    // Stop BGM and stop tractor beam sound
+                    audioManager.stopTractorBeam();
+                }
+            } else {
+                // If boss gets destroyed mid-capture
+                this.player.isCaptured = false;
+                this.player.captureScale = 2.0;
+                this.player.captureAngle = 0;
+            }
+        }
+
+        // Trigger Diving attacks when formation is stable
+        if (!this.activeWaves && this.enemies.length > 0) {
+            this.diveAttackTimer -= dt;
+            if (this.diveAttackTimer <= 0) {
+                // Pick candidates from formation
+                const formationEnemies = this.enemies.filter(e => e.enemyState === "FORMATION");
+                if (formationEnemies.length > 0) {
+                    const choice = formationEnemies[Math.floor(Math.random() * formationEnemies.length)];
+                    
+                    if (choice.type === "BOSS") {
+                        // Boss dives, potentially accompanied by guards (Goons)
+                        choice.enemyState = "DIVING";
+                        choice.diveTimer = 0;
+                        choice.divePhase = 0;
+                        
+                        // Select 1 or 2 neighboring Goons to dive as escort
+                        const escorts = formationEnemies.filter(e => e.type === "GOON" && Math.abs(e.gridCol - choice.gridCol) <= 2);
+                        const numEscorts = Math.min(escorts.length, 2);
+                        for (let k = 0; k < numEscorts; k++) {
+                            escorts[k].enemyState = "DIVING";
+                            escorts[k].diveTimer = 0;
+                        }
+                    } else if (choice.type !== "CAPTURED_FIGHTER") {
+                        choice.enemyState = "DIVING";
+                        choice.diveTimer = 0;
+                    }
+                }
+                this.diveAttackTimer = 3.5 + Math.random() * 2.0 - (this.stage * 0.1);
+                if (this.diveAttackTimer < 1.5) this.diveAttackTimer = 1.5;
+            }
+        }
+
+        // Update docking fighters (Free fall sequence)
+        this.dockingFighters.forEach(df => {
+            df.update(dt, playerX);
+
+            // If player catches docking fighter
+            if (this.player && !this.player.isDead && !this.player.isCaptured) {
+                const r1 = this.player.getBounds();
+                const r2 = df.getBounds();
+                if (checkCollision(r1, r2)) {
+                    // Fusion!
+                    this.player.isDual = true;
+                    this.player.width = 64;
+                    df.isDead = true;
+                    audioManager.playBGM("lifeup");
+                    
+                    // Create fusion flash particles
+                    this.createExplosionParticles(this.player.x + 32, this.player.y + 16, "#FFFFFF", 20);
+                }
+            }
+        });
+
+        // Update Projectiles
+        this.projectiles.forEach(p => {
+            p.update(dt);
+            if (p.y < 0 || p.y > 512 || p.x < 0 || p.x > 448) {
+                p.isDead = true;
+            }
+        });
+
+        // Check Collisions
+        this.checkCollisions();
+
+        // Release/Sweep Dead elements back into pools
+        for (let i = this.projectiles.length - 1; i >= 0; i--) {
+            if (this.projectiles[i].isDead) {
+                projectilePool.release(this.projectiles[i]);
+                this.projectiles.splice(i, 1);
+            }
+        }
+
+        this.enemies = this.enemies.filter(e => !e.isDead);
+        this.dockingFighters = this.dockingFighters.filter(df => !df.isDead);
+
+        // Check Stage Clear Condition
+        if (this.enemies.length === 0 && this.spawnQueue.length > 0 && this.waveIndex >= this.spawnQueue.length) {
+            this.triggerLevelClear();
+        } else if (this.enemies.length === 0 && !this.activeWaves) {
+            this.triggerLevelClear();
+        }
+    }
+
+    checkCollisions() {
+        if (!this.player || this.player.isDead) return;
+
+        const pBounds = this.player.getBounds();
+
+        // 1. Player Projectiles vs Enemies
+        this.projectiles.forEach(proj => {
+            if (proj.owner !== "PLAYER" || proj.isDead) return;
+
+            const projBounds = proj.getBounds();
+
+            for (let i = 0; i < this.enemies.length; i++) {
+                const enemy = this.enemies[i];
+                if (enemy.isDead) continue;
+
+                if (checkCollision(projBounds, enemy.getBounds())) {
+                    proj.isDead = true;
+                    this.shotsHit++;
+
+                    const dead = enemy.hit();
+                    if (dead) {
+                        this.createExplosionParticles(enemy.x + 16, enemy.y + 16, this.getEnemyColor(enemy.type), 15);
+                        audioManager.playExplosion(enemy.type === "BOSS");
+                        this.addScore(enemy);
+
+                        // If destroyed Boss was holding a captured fighter, release it
+                        if (enemy.type === "BOSS" && enemy.hasCapturedFighter && enemy.capturedFighterRef) {
+                            // Find the bound captured enemy sprite and kill it
+                            const capturedEnemy = enemy.capturedFighterRef;
+                            capturedEnemy.isDead = true;
+
+                            // Create docking sequence fighter
+                            const df = new DockingFighter(enemy.x, enemy.y);
+                            this.dockingFighters.push(df);
+                        }
+                    } else {
+                        // Flashing hit feedback particle
+                        this.createExplosionParticles(proj.x, proj.y, "#FFFFFF", 3);
+                    }
+                    break;
+                }
+            }
+        });
+
+        // 2. Enemy Projectiles vs Player
+        this.projectiles.forEach(proj => {
+            if (proj.owner !== "ENEMY" || proj.isDead) return;
+
+            if (checkCollision(proj.getBounds(), pBounds)) {
+                proj.isDead = true;
+                const fatal = this.player.hit();
+                if (fatal) {
+                    this.killPlayer();
+                } else {
+                    // Dual loss explosion representation
+                    this.createExplosionParticles(this.player.x + 16, this.player.y + 16, "#FF5555", 15);
+                    audioManager.playExplosion(false);
+                }
+            }
+        });
+
+        // 3. Enemy Body vs Player Body
+        this.enemies.forEach(enemy => {
+            if (enemy.isDead) return;
+
+            if (checkCollision(enemy.getBounds(), pBounds)) {
+                // If it is the captured fighter itself, don't crash but let it pass or hit
+                if (enemy.type === "CAPTURED_FIGHTER") {
+                    return;
+                }
+
+                enemy.isDead = true;
+                this.createExplosionParticles(enemy.x + 16, enemy.y + 16, this.getEnemyColor(enemy.type), 15);
+                audioManager.playExplosion(enemy.type === "BOSS");
+
+                const fatal = this.player.hit();
+                if (fatal) {
+                    this.killPlayer();
+                } else {
+                    this.createExplosionParticles(this.player.x + 16, this.player.y + 16, "#FF5555", 15);
+                }
+            }
+        });
+
+        // 4. Player Projectiles vs Docking Fighter (Friendly Fire)
+        this.projectiles.forEach(proj => {
+            if (proj.owner !== "PLAYER" || proj.isDead) return;
+
+            const projBounds = proj.getBounds();
+            this.dockingFighters.forEach(df => {
+                if (df.isDead) return;
+
+                if (checkCollision(projBounds, df.getBounds())) {
+                    proj.isDead = true;
+                    df.isDead = true;
+                    // Destroyed by friendly fire
+                    this.createExplosionParticles(df.x + 16, df.y + 16, "#FFFFFF", 20);
+                    audioManager.playExplosion(false);
+                }
+            });
+        });
+    }
+
+    killPlayer() {
+        this.createExplosionParticles(this.player.x + 16, this.player.y + 16, "#FFFFFF", 30);
+        audioManager.playExplosion(true);
+        this.player.isDead = true;
+        this.lives--;
+        this.respawnTimer = 1.8;
+    }
+
+    changeToGameOver() {
+        this.state = "GAME_OVER";
+        audioManager.playBGM("gameover");
+        if (this.score > this.highScore) {
+            this.highScore = this.score;
+            localStorage.setItem("galaga_high_score", this.highScore);
+        }
+    }
+
+    triggerLevelClear() {
+        this.state = "LEVEL_CLEAR";
+        this.stageClearTimer = 3.5; // Display stats for 3.5 seconds
+        audioManager.playBGM("stageclear");
+
+        // Apply bonus scores
+        const ratio = this.shotsFired > 0 ? (this.shotsHit / this.shotsFired) : 0;
+        const bonus = Math.round(ratio * 100) * 10;
+        this.score += bonus;
+    }
+
+    addScore(enemy) {
+        let pts = 100;
+        if (enemy.type === "BOSS") {
+            pts = enemy.enemyState === "FORMATION" ? 150 : 400;
+        } else if (enemy.type === "GOON") {
+            pts = enemy.enemyState === "FORMATION" ? 80 : 160;
+        } else if (enemy.type === "DRONE") {
+            pts = enemy.enemyState === "FORMATION" ? 50 : 100;
+        } else if (enemy.type === "CAPTURED_FIGHTER") {
+            pts = 100; // Killing your own captured fighter
+        }
+
+        const oldScore = this.score;
+        this.score += pts;
+
+        // Extra Life rules (First 20,000 pts, then every 70,000 pts)
+        const gotLife20k = (oldScore < 20000 && this.score >= 20000);
+        const oldCycles = Math.floor((oldScore - 20000) / 70000);
+        const newCycles = Math.floor((this.score - 20000) / 70000);
+        const gotLife70k = (oldScore >= 20000 && newCycles > oldCycles);
+
+        if (gotLife20k || gotLife70k) {
+            this.lives++;
+            audioManager.playBGM("lifeup");
+        }
+    }
+
+    getEnemyColor(type) {
+        if (type === "BOSS") return "#FFFF55";
+        if (type === "GOON") return "#FF5555";
+        if (type === "DRONE") return "#55FF55";
+        return "#FFFFFF";
+    }
+
+    createExplosionParticles(x, y, color, count) {
+        for (let i = 0; i < count; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = Math.random() * 150 + 50;
+            const vx = Math.cos(angle) * speed;
+            const vy = Math.sin(angle) * speed;
+            const size = Math.random() * 2 + 1.5;
+            const life = Math.random() * 0.4 + 0.3;
+
+            const p = particlePool.acquire(x, y, vx, vy, color, size, life);
+            this.particles.push(p);
+        }
+    }
+
+    draw() {
+        // Clear Canvas
+        this.ctx.fillStyle = "#000000";
+        this.ctx.fillRect(0, 0, 448, 512);
+
+        // Draw Starfield
+        this.starfield.draw(this.ctx);
+
+        if (this.state === "INTRO") {
+            this.drawIntroScreen();
+            return;
+        }
+
+        // Draw active entities
+        this.enemies.forEach(enemy => enemy.draw(this.ctx));
+        this.dockingFighters.forEach(df => df.draw(this.ctx));
+        this.projectiles.forEach(p => p.draw(this.ctx));
+        this.particles.forEach(pt => pt.draw(this.ctx));
+
+        if (this.player && !this.player.isDead) {
+            this.player.draw(this.ctx);
+        }
+
+        // Draw Game HUD UI
+        this.drawHUD();
+
+        if (this.state === "PAUSED") {
+            this.ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+            this.ctx.fillRect(0, 0, 448, 512);
+
+            this.ctx.fillStyle = "#00FFFF";
+            this.ctx.font = "bold 24px 'Courier New', monospace";
+            this.ctx.textAlign = "center";
+            this.ctx.fillText("PAUSED", 224, 256);
+        } else if (this.state === "LEVEL_CLEAR") {
+            this.drawLevelClearScreen();
+        } else if (this.state === "GAME_OVER") {
+            this.drawGameOverScreen();
+        }
+    }
+
+    drawIntroScreen() {
+        this.ctx.save();
+        // Title
+        this.ctx.fillStyle = "#FF0000";
+        this.ctx.font = "bold 42px 'Courier New', monospace";
+        this.ctx.textAlign = "center";
+        this.ctx.fillText("GALAGA", 224, 150);
+
+        this.ctx.fillStyle = "#00FFFF";
+        this.ctx.font = "bold 18px 'Courier New', monospace";
+        this.ctx.fillText("RETRO CLONE", 224, 185);
+
+        // Render showcase sprites in center
+        drawPixelSprite(this.ctx, SPRITE_BOSS_A, 224 - 16, 230, 2.5);
+        drawPixelSprite(this.ctx, SPRITE_GOON_A, 150 - 16, 235, 2);
+        drawPixelSprite(this.ctx, SPRITE_DRONE_A, 298 - 16, 235, 2);
+
+        this.ctx.fillStyle = "#FFFFFF";
+        this.ctx.font = "14px 'Courier New', monospace";
+        this.ctx.fillText("BOSS    - 150/400 PTS", 224, 290);
+        this.ctx.fillText("GUARD   -  80/160 PTS", 224, 310);
+        this.ctx.fillText("DRONE   -  50/100 PTS", 224, 330);
+
+        // Blinking PRESS ENTER TO START
+        if (Math.floor(Date.now() / 500) % 2 === 0) {
+            this.ctx.fillStyle = "#FFFF00";
+            this.ctx.font = "bold 18px 'Courier New', monospace";
+            this.ctx.fillText("PRESS ENTER TO START", 224, 400);
+        }
+
+        this.ctx.fillStyle = "#55FF55";
+        this.ctx.font = "12px 'Courier New', monospace";
+        this.ctx.fillText("USE LEFT/RIGHT KEYS & SPACEBAR TO SHOOT", 224, 450);
+
+        this.ctx.restore();
+    }
+
+    drawHUD() {
+        this.ctx.save();
+        this.ctx.font = "bold 14px 'Courier New', monospace";
+        
+        // 1UP Score
+        this.ctx.fillStyle = "#FF0000";
+        this.ctx.textAlign = "left";
+        this.ctx.fillText("1UP", 24, 20);
+        this.ctx.fillStyle = "#FFFFFF";
+        this.ctx.fillText(this.score.toString().padStart(6, "0"), 24, 38);
+
+        // High Score
+        this.ctx.fillStyle = "#FF0000";
+        this.ctx.textAlign = "center";
+        this.ctx.fillText("HIGH SCORE", 224, 20);
+        this.ctx.fillStyle = "#FFFFFF";
+        this.ctx.fillText(this.highScore.toString().padStart(6, "0"), 224, 38);
+
+        // Lives representation as small player icons in bottom left
+        const miniPlayer = [
+            "..W..",
+            ".WWW.",
+            "WWRWW",
+            "WWWWW",
+            "W...W"
+        ];
+        for (let i = 0; i < this.lives - 1; i++) {
+            drawPixelSprite(this.ctx, miniPlayer, 15 + i * 16, 490, 2);
+        }
+
+        // Stage Indicator as blue boxes/emblems bottom right
+        this.ctx.fillStyle = "#1E90FF";
+        this.ctx.textAlign = "right";
+        this.ctx.fillText(`STAGE ${this.stage}`, 430, 500);
+
+        this.ctx.restore();
+    }
+
+    drawLevelClearScreen() {
+        this.ctx.save();
+        this.ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
+        this.ctx.fillRect(0, 0, 448, 512);
+
+        this.ctx.fillStyle = "#00FF00";
+        this.ctx.font = "bold 26px 'Courier New', monospace";
+        this.ctx.textAlign = "center";
+        this.ctx.fillText("STAGE CLEAR", 224, 180);
+
+        const ratio = this.shotsFired > 0 ? Math.round((this.shotsHit / this.shotsFired) * 100) : 0;
+
+        this.ctx.fillStyle = "#FFFFFF";
+        this.ctx.font = "18px 'Courier New', monospace";
+        this.ctx.fillText(`SHOTS FIRED: ${this.shotsFired}`, 224, 240);
+        this.ctx.fillText(`SHOTS HIT  : ${this.shotsHit}`, 224, 275);
+        this.ctx.fillStyle = "#FFFF00";
+        this.ctx.fillText(`HIT RATIO  : ${ratio}%`, 224, 310);
+
+        const bonus = ratio * 10;
+        this.ctx.fillStyle = "#00FFFF";
+        this.ctx.fillText(`BONUS POINTS: +${bonus}`, 224, 355);
+
+        this.ctx.restore();
+    }
+
+    drawGameOverScreen() {
+        this.ctx.save();
+        this.ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+        this.ctx.fillRect(0, 0, 448, 512);
+
+        this.ctx.fillStyle = "#FF0000";
+        this.ctx.font = "bold 32px 'Courier New', monospace";
+        this.ctx.textAlign = "center";
+        this.ctx.fillText("GAME OVER", 224, 220);
+
+        this.ctx.fillStyle = "#FFFFFF";
+        this.ctx.font = "20px 'Courier New', monospace";
+        this.ctx.fillText(`FINAL SCORE: ${this.score}`, 224, 280);
+
+        if (Math.floor(Date.now() / 500) % 2 === 0) {
+            this.ctx.fillStyle = "#FFFF00";
+            this.ctx.font = "16px 'Courier New', monospace";
+            this.ctx.fillText("PRESS ENTER TO RETRY", 224, 360);
+        }
+        this.ctx.restore();
+    }
+
+    checkCollision(r1, r2) {
+        return (
+            r1.x < r2.x + r2.width &&
+            r1.x + r1.width > r2.x &&
+            r1.y < r2.y + r2.height &&
+            r1.y + r1.height > r2.y
+        );
+    }
+}
+
+// Global collision check utility (mirrors class check)
+function checkCollision(r1, r2) {
+    return (
+        r1.x < r2.x + r2.width &&
+        r1.x + r1.width > r2.x &&
+        r1.y < r2.y + r2.height &&
+        r1.y + r1.height > r2.y
+    );
+}
+
+// Start Game Engine
+const game = new Game();
+game.init();
+game.start();
+
+</script>
+</body>
+</html>
