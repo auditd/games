@@ -1,0 +1,10 @@
+{
+  "name": "Tetris Retro Arcade",
+  "short_name": "Tetris",
+  "description": "Retro style Tetris puzzle game built with HTML5 Canvas.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#222222",
+  "theme_color": "#222222",
+  "orientation": "portrait"
+}
